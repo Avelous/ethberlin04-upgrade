@@ -1,65 +1,152 @@
 "use client";
 
-import Link from "next/link";
+import { useCallback, useState } from "react";
+// import { ZKEdDSAEventTicketPCDPackage } from "@pcd/zk-eddsa-event-ticket-pcd";
+import { zuAuthPopup } from "@pcd/zuauth";
 import type { NextPage } from "next";
+// import { hexToBigInt } from "viem";
 import { useAccount } from "wagmi";
-import { BugAntIcon, MagnifyingGlassIcon } from "@heroicons/react/24/outline";
-import { Address } from "~~/components/scaffold-eth";
+import { MetaHeader } from "~~/components/MetaHeader";
+import { useScaffoldReadContract, useScaffoldWriteContract } from "~~/hooks/scaffold-eth";
+import { notification } from "~~/utils/scaffold-eth";
+import { generateWitness } from "~~/utils/scaffold-eth/pcd";
+import { ETHBERLIN_ZUAUTH_CONFIG } from "~~/utils/zupassConstants";
+
+// Get a valid event id from { supportedEvents } from "zuauth" or https://api.zupass.org/issue/known-ticket-types
+const fieldsToReveal = {
+  revealAttendeeEmail: true,
+  revealEventId: true,
+  revealProductId: true,
+};
 
 const Home: NextPage = () => {
+  const [identityCreated, setIdentityCreated] = useState(false);
+  const [fileUploded, setFileUploded] = useState(false);
+  const [addedCommunityContributor, setAddedCommunityContributor] = useState(false);
   const { address: connectedAddress } = useAccount();
+  const [pcd, setPcd] = useState<string>();
+
+  const getProof = useCallback(async () => {
+    if (!connectedAddress) {
+      notification.error("Please connect wallet");
+      return;
+    }
+    const result = await zuAuthPopup({ fieldsToReveal, watermark: connectedAddress, config: ETHBERLIN_ZUAUTH_CONFIG });
+    if (result.type === "pcd") {
+      setPcd(JSON.parse(result.pcdStr).pcd);
+    } else {
+      notification.error("Failed to parse PCD");
+    }
+  }, [connectedAddress]);
+
+  const { writeContractAsync: addCommunityCollaborator, isMining: isAddingCommunityCollaborator } =
+    useScaffoldWriteContract("CommunityPortal");
+
+  const { data: communityPortalAddress } = useScaffoldReadContract({
+    contractName: "CommunityPortal",
+    functionName: "communityPortal",
+  });
 
   return (
     <>
-      <div className="flex items-center flex-col flex-grow pt-10">
-        <div className="px-5">
-          <h1 className="text-center">
-            <span className="block text-2xl mb-2">Welcome to</span>
-            <span className="block text-4xl font-bold">Scaffold-ETH 2</span>
-          </h1>
-          <div className="flex justify-center items-center space-x-2">
-            <p className="my-2 font-medium">Connected Address:</p>
-            <Address address={connectedAddress} />
-          </div>
-          <p className="text-center text-lg">
-            Get started by editing{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/nextjs/app/page.tsx
-            </code>
-          </p>
-          <p className="text-center text-lg">
-            Edit your smart contract{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              YourContract.sol
-            </code>{" "}
-            in{" "}
-            <code className="italic bg-base-300 text-base font-bold max-w-full break-words break-all inline-block">
-              packages/hardhat/contracts
-            </code>
-          </p>
-        </div>
-
-        <div className="flex-grow bg-base-300 w-full mt-16 px-8 py-12">
-          <div className="flex justify-center items-center gap-12 flex-col sm:flex-row">
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <BugAntIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Tinker with your smart contract using the{" "}
-                <Link href="/debug" passHref className="link">
-                  Debug Contracts
-                </Link>{" "}
-                tab.
-              </p>
-            </div>
-            <div className="flex flex-col bg-base-100 px-10 py-10 text-center items-center max-w-xs rounded-3xl">
-              <MagnifyingGlassIcon className="h-8 w-8 fill-secondary" />
-              <p>
-                Explore your local transactions with the{" "}
-                <Link href="/blockexplorer" passHref className="link">
-                  Block Explorer
-                </Link>{" "}
-                tab.
-              </p>
+      <MetaHeader />
+      <div className="flex flex-col items-center mt-24">
+        <div className="card max-w-[90%] sm:max-w-lg bg-base-100 shadow-xl">
+          <div className="card-body">
+            <h2 className="card-title">Community Identity for Collaboration</h2>
+            <div className="flex flex-col gap-4 mt-6">
+              <div className="tooltip" data-tip="Loads the Zupass UI in a modal, where you can prove your PCD.">
+                <button className="btn btn-primary w-full tooltip" onClick={getProof} disabled={!!pcd}>
+                  {!pcd ? "1. Get Proof" : "1. Proof Received!"}
+                </button>
+              </div>
+              <div className="tooltip" data-tip="Create a new identity to get access to community archive portal">
+                <button
+                  className="btn btn-primary w-full"
+                  disabled={!pcd || identityCreated}
+                  onClick={async () => {
+                    // try {
+                    //   await addCommunityCollaborator(
+                    //   {
+                    //     functionName: "addCommunityCollaborator",
+                    //     // @ts-ignore TODO: fix the type later with readonly fixed length bigInt arrays
+                    //     args: [pcd ? generateWitness(JSON.parse(pcd)) : undefined, connectedAddress],
+                    //   }
+                    // );
+                    // } catch (e) {
+                    //   notification.error(`Error: ${e}`);
+                    //   return;
+                    // }
+                    // setAddedCommunityContributor(true);
+                  }}
+                >
+                  {"2. Create New Identity"}
+                </button>
+              </div>
+              <div
+                className="tooltip"
+                data-tip="Submit the proof to a smart contract to verify it on-chain and get added as a collaborator to community portal."
+              >
+                <button
+                  className="btn btn-primary w-full"
+                  disabled={!pcd || addedCommunityContributor}
+                  onClick={async () => {
+                    try {
+                      await addCommunityCollaborator({
+                        functionName: "addCommunityCollaborator",
+                        // @ts-ignore TODO: fix the type later with readonly fixed length bigInt arrays
+                        args: [pcd ? generateWitness(JSON.parse(pcd)) : undefined, connectedAddress],
+                      });
+                    } catch (e) {
+                      notification.error(`Error: ${e}`);
+                      return;
+                    }
+                    setAddedCommunityContributor(true);
+                  }}
+                >
+                  {isAddingCommunityCollaborator ? (
+                    <span className="loading loading-spinner"></span>
+                  ) : (
+                    "3. Verify (on-chain) and add community collaborator"
+                  )}
+                </button>
+              </div>
+              <div className="tooltip" data-tip="Upload file and put it on community portal">
+                <button
+                  className="btn btn-primary w-full"
+                  disabled={!pcd || fileUploded}
+                  onClick={async () => {
+                    // try {
+                    //   await addCommunityCollaborator(
+                    //   {
+                    //     functionName: "addCommunityCollaborator",
+                    //     // @ts-ignore TODO: fix the type later with readonly fixed length bigInt arrays
+                    //     args: [pcd ? generateWitness(JSON.parse(pcd)) : undefined, connectedAddress],
+                    //   }
+                    // );
+                    // } catch (e) {
+                    //   notification.error(`Error: ${e}`);
+                    //   return;
+                    // }
+                    // setAddedCommunityContributor(true);
+                  }}
+                >
+                  {"4. Add to community archive"}
+                </button>
+              </div>
+              <div className="flex justify-center">
+                <button
+                  className="btn btn-ghost text-error underline normal-case"
+                  onClick={() => {
+                    setAddedCommunityContributor(false);
+                  }}
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="text-center text-xl">
+                {communityPortalAddress ? `🍾 Community Portal Address: ${communityPortalAddress}!!! 🥂 🎊` : ""}
+              </div>
             </div>
           </div>
         </div>
